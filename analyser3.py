@@ -2,260 +2,314 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+
+
 def parse_trace(file_path, flow_identifier):
     """
-    解析trace文件，提取指定流的吞吐量、丢包率及时间序列数据
-    flow_identifier: 元组(源节点, 目的节点)，如('1', '2')
+    Parse the trace file and extract the throughput, packet loss rate and time series data of the specified stream. 
     """
     data = []
-    with open(file_path, 'r') as f:
-        for line in f:
-            fields = line.strip().split()
-            if not fields:
-                continue
-           
-            if fields[0] in ['+', '-', 'r','d']:
-                time = float(fields[1])
+    send_count = 0
+    recv_count = 0
+    flow_src, flow_dst_final = flow_identifier
+    try:
+        with open(file_path, 'r') as f:
+            for line_num, line in enumerate(f, 1):
+                fields = line.strip().split()
+                if len(fields) < 6:
+                    continue
+                event = fields[0]
                 src = fields[2]
                 dst = fields[3]
                 proto = fields[4]
-                size = int(fields[5])
-                if size>=1000 and (src, dst) == flow_identifier and proto == 'tcp':
+                if event not in ['+', 'r'] or proto.lower() != 'tcp':
+                    continue
+                try:
+                    size = int(fields[5])
+                except ValueError:
+                    continue
+                if size < 1000:
+                    continue
+                try:
+                    time = float(fields[1])
+                except ValueError:
+                    time = 0.0
+                if event == '+' and src == flow_src:
+                    send_count += 1
                     data.append({
-                        'event': fields[0],
+                        'event': event,
                         'time': time,
-                        'size': size
+                        'size': size,
+                        'src': src,
+                        'dst': dst
                     })
-    df = pd.DataFrame(data)
-    if df.empty:
-        print(f"警告：流 {flow_identifier} 在 {file_path} 中无符合条件的数据包")
-        return 0.0, 0.0, df  # 返回0吞吐量、0丢包率，避免后续报错
-
-    recv_df = df[df['event'] == 'r']
-    total_bits = recv_df['size'].sum() * 8  # 字节转比特
-    total_time = df['time'].max() if not df.empty else 0
-    goodput = total_bits / total_time * 1e-6 if total_time > 0 else 0  # 转换为Mbps
-    recv_count = len(recv_df)
-    loss_count = len(df[df['event'] == 'd']) if 'd' in df['event'].unique() else 0
-    loss_rate = (loss_count / (recv_count + loss_count)) * 100 if (recv_count + loss_count) > 0 else 0
-    
-    return goodput, loss_rate, df
+                elif event == 'r' and dst == flow_dst_final:
+                    recv_count += 1
+                    data.append({
+                        'event': event,
+                        'time': time,
+                        'size': size,
+                        'src': src,
+                        'dst': dst
+                    })
+        df = pd.DataFrame(data) if data else pd.DataFrame(columns=['event', 'time', 'size', 'src', 'dst'])
+        recv_df = df[df['event'] == 'r']
+        if not recv_df.empty:
+            total_bits = recv_df['size'].sum() * 8
+            total_time = recv_df['time'].max() - recv_df['time'].min()
+            goodput = total_bits / total_time * 1e-6 if total_time > 0 else 0.0
+        else:
+            goodput = 0.0
+        loss_rate = ((send_count - recv_count) / send_count) * 100 if send_count > 0 else 0.0
+        return goodput, loss_rate, df
+    except FileNotFoundError:
+        print(f"no file: {file_path}")
+        return 0.0, 0.0, pd.DataFrame()
+    except Exception as e:
+        print(f"Error occurred while parsing {file_path}：{str(e)}")
+        return 0.0, 0.0, pd.DataFrame()
 
 
 def generate_table_and_plot():
     tcp_algos = ['cubic', 'reno', 'yeah', 'vegas']
-    flow_id = ('2', '3')  # 假设主数据流为源节点1→目的节点2（需根据实际拓扑确认）
-    goodputs = []
-    loss_rates = []
-
+    # per-flow：n1->n5 (0->4), n2->n6 (1->5)
+    flow_id_1 = ('0', '4')  # Flow 1: n1 -> n5
+    flow_id_2 = ('1', '5')  # Flow 2: n2 -> n6
+    algo_list = []
+    f1_goodputs, f1_losses = [], []
+    f2_goodputs, f2_losses = [], []
+    avg_goodputs, avg_losses = [], []
     for algo in tcp_algos:
         file = f'{algo}Trace.tr'
-        goodput, loss_rate, _ = parse_trace(file, flow_id)
-        goodputs.append(goodput)
-        loss_rates.append(loss_rate)
+        g1, l1, _ = parse_trace(file, flow_id_1)
+        g2, l2, _ = parse_trace(file, flow_id_2)
+
+        avg_g = (g1 + g2) / 2.0
+        avg_l = (l1 + l2) / 2.0
+        algo_list.append(algo)
+        f1_goodputs.append(g1)
+        f1_losses.append(l1)
+        f2_goodputs.append(g2)
+        f2_losses.append(l2)
+        avg_goodputs.append(avg_g)
+        avg_losses.append(avg_l)
     table_data = {
-        'TCP Algorithm': tcp_algos,
-        'Total Goodput (Mbps)': goodputs,
-        'Packet Loss Rate (%)': loss_rates
+        'TCP Algorithm': algo_list,
+        'Flow1 Goodput (Mbps)': f1_goodputs,
+        'Flow1 Packet Loss Rate (%)': f1_losses,
+        'Flow2 Goodput (Mbps)': f2_goodputs,
+        'Flow2 Packet Loss Rate (%)': f2_losses,
+        'Avg Goodput (Mbps)': avg_goodputs,
+        'Avg Packet Loss Rate (%)': avg_losses,
     }
     df_table = pd.DataFrame(table_data)
-    print("=== 吞吐量与丢包率表格 ===")
+    print("=== Throughput and Packet Loss Rate Table (per-flow & average) ===")
     print(df_table)
     df_table.to_csv('goodput_loss_table.csv', index=False)
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
-    
-    # 子图1：吞吐量对比
-    ax1.bar(tcp_algos, goodputs, color=['cyan', 'magenta', 'yellow', 'blue'])
-    ax1.set_ylabel('Goodput (Mbps)')
-    ax1.set_title('TCP Algorithm vs Total Goodput')
-
-    ax2.bar(tcp_algos, loss_rates, color=['cyan', 'magenta', 'yellow', 'blue'])
+    ax1.bar(tcp_algos, avg_goodputs, color=['cyan', 'magenta', 'yellow', 'blue'])
+    ax1.set_ylabel('Avg Goodput (Mbps)')
+    ax1.set_title('TCP Algorithm vs Average Goodput (2 flows)')
+    ax2.bar(tcp_algos, avg_losses, color=['cyan', 'magenta', 'yellow', 'blue'])
     ax2.set_xlabel('TCP Algorithm')
-    ax2.set_ylabel('Packet Loss Rate (%)')
-    ax2.set_title('TCP Algorithm vs Packet Loss Rate')
+    ax2.set_ylabel('Avg Packet Loss Rate (%)')
+    ax2.set_title('TCP Algorithm vs Average Packet Loss Rate (2 flows)')
     plt.tight_layout()
     plt.savefig('goodput_loss_comparison.png')
     plt.show()
-    return goodputs, loss_rates  # 返回实际解析的吞吐量、丢包率列表
-  
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
+    x = np.arange(len(tcp_algos))
+    width = 0.35
+    ax1.bar(x - width/2, f1_goodputs, width, label='Flow1 (n1→n5)', color='cyan')
+    ax1.bar(x + width/2, f2_goodputs, width, label='Flow2 (n2→n6)', color='magenta')
+    ax1.set_ylabel('Goodput (Mbps)')
+    ax1.set_title('TCP Algorithm vs Per-flow Goodput')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(tcp_algos)
+    ax1.legend()
+    ax2.bar(x - width/2, f1_losses, width, label='Flow1 (n1→n5)', color='cyan')
+    ax2.bar(x + width/2, f2_losses, width, label='Flow2 (n2→n6)', color='magenta')
+    ax2.set_xlabel('TCP Algorithm')
+    ax2.set_ylabel('Packet Loss Rate (%)')
+    ax2.set_title('TCP Algorithm vs Per-flow Packet Loss Rate')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(tcp_algos)
+    ax2.legend()
+    plt.tight_layout()
+    plt.savefig('per_flow_goodput_loss_comparison.png')
+    plt.show()
+
+    return avg_goodputs, avg_losses
 
 
 def calculate_jain_fairness():
     tcp_algos = ['cubic', 'reno', 'yeah', 'vegas']
-    flow_id = ('2', '3')
-    throughputs = []
-    total_times = []
-
+    flow_id_1 = ('0', '4')  
+    flow_id_2 = ('1', '5')
+    jain_indices = []      
+    per_algo_flows = []
+    print("\n=== Jain Fairness Index over last 1/3 (per algorithm, 2 flows) ===")
     for algo in tcp_algos:
         file = f'{algo}Trace.tr'
-        _, _, df = parse_trace(file, flow_id)
-    # 提取后三分之一时间段（[2T/3, T]）的吞吐量
-        T = df['time'].max() if not df.empty else 100  # 动态获取每个算法的总时长
-        total_times.append(T)   
-        late_df = df[(df['time'] >= (2*T/3)) & (df['time'] <= T)]
-        recv_late = late_df[late_df['event'] == 'r']
-        total_bits = recv_late['size'].sum() * 8
-        late_goodput = total_bits / (T/3) * 1e-6  # 转换为Mbps
-        throughputs.append(late_goodput)
+        _, _, df1 = parse_trace(file, flow_id_1)
+        _, _, df2 = parse_trace(file, flow_id_2)
+        flow_throughputs = []
+        for df in (df1, df2):
+            if df.empty:
+                flow_throughputs.append(0.0)
+                continue
+            T = df['time'].max()
+            if T <= 0:
+                flow_throughputs.append(0.0)
+                continue
+            start = 2 * T / 3
+            late_df = df[(df['event'] == 'r') & (df['time'] >= start)]
+            total_bits = late_df['size'].sum() * 8
+            late_goodput = total_bits / (T / 3) * 1e-6 if T > 0 else 0.0
+            flow_throughputs.append(late_goodput)
+        if sum(x * x for x in flow_throughputs) > 0:
+            numerator = (sum(flow_throughputs)) ** 2
+            denominator = len(flow_throughputs) * sum(x**2 for x in flow_throughputs)
+            jain = numerator / denominator
+        else:
+            jain = 0.0
+        jain_indices.append(jain)
+        per_algo_flows.append(flow_throughputs)
 
-    # 计算Jain公平指数
-    numerator = (sum(throughputs)) ** 2
-    denominator = len(throughputs) * sum([x**2 for x in throughputs])
-    jain_index = numerator / denominator
-    avg_throughput = np.mean(throughputs)
-    fairness_deviations = [abs(thru - avg_throughput) / avg_throughput for thru in throughputs]
-    fairest_idx = np.argmin(fairness_deviations)
+        print(f"{algo}: Jain = {jain:.4f}, flows last-1/3 throughputs = {[f'{x:.4f}' for x in flow_throughputs]} Mbps")
+
+    fairest_idx = int(np.argmax(jain_indices)) if jain_indices else 0
     fairest_algo = tcp_algos[fairest_idx]
-    print(f"\n=== Jain公平指数（后三分之一时间段） ===")
-    print(f"Jain Index: {jain_index:.4f}")
-    print(f"各算法吞吐量（Mbps）: {dict(zip(tcp_algos, throughputs))}")
-    print(f"最公平算法: {fairest_algo}（与平均吞吐量偏差最小：{fairness_deviations[fairest_idx]:.4f}）")
-    return jain_index, throughputs,fairest_algo  
+    print(f"Fairest algorithm overall: {fairest_algo} (Jain = {jain_indices[fairest_idx]:.4f})")
 
+    
+    return jain_indices, per_algo_flows, fairest_algo
 
 def calculate_throughput_cov():
     tcp_algos = ['cubic', 'reno', 'yeah', 'vegas']
-    flow_id = ('2', '3')
+    flow_id_1 = ('0', '4')
+    flow_id_2 = ('1', '5')
     covs = []
-
-    for algo in tcp_algos:
-        file = f'{algo}Trace.tr'
-        _, _, df = parse_trace(file, flow_id)
-        # 按秒统计吞吐量（假设时间戳为连续秒数）
+    def cov_from_df(df):
+        if df.empty:
+            return 0.0
+        df = df.copy()
         df['time_second'] = df['time'].astype(int)
-        recv_per_sec = df[df['event'] == 'r'].groupby('time_second')['size'].sum() * 8 / 1e6  # 每秒Mbps
+        recv_per_sec = df[df['event'] == 'r'].groupby('time_second')['size'].sum() * 8 / 1e6
+        if recv_per_sec.empty:
+            return 0.0
         mean = recv_per_sec.mean()
         std = recv_per_sec.std()
-        cov = std / mean if mean != 0 else 0
-        covs.append(cov)
+        return std / mean if mean != 0 else 0.0
+    for algo in tcp_algos:
+        file = f'{algo}Trace.tr'
+        _, _, df1 = parse_trace(file, flow_id_1)
+        _, _, df2 = parse_trace(file, flow_id_2)
 
-
-    # 找出最小CoV的算法
-    min_cov_idx = np.argmin(covs)
-    most_stable_algo = tcp_algos[min_cov_idx]  # 动态获取，非硬编码
-    print("\n=== 吞吐量稳定性（CoV） ===")
-    print(f"各算法CoV: {dict(zip(tcp_algos, covs))}")
-    print(f"最稳定算法: {most_stable_algo} (CoV={covs[min_cov_idx]:.4f})")
+        cov1 = cov_from_df(df1)
+        cov2 = cov_from_df(df2)
+        cov_avg = (cov1 + cov2) / 2.0
+        covs.append(cov_avg)
+    min_cov_idx = int(np.argmin(covs)) if covs else 0
+    most_stable_algo = tcp_algos[min_cov_idx]
+    print("\n=== Throughput stability (CoV, averaged over 2 flows) ===")
+    print(f"CoV per algorithm: {dict(zip(tcp_algos, [round(x, 4) for x in covs]))}")
+    print(f"Most stable algorithm: {most_stable_algo} (CoV={covs[min_cov_idx]:.4f})")
     return covs, most_stable_algo
 
-def get_best_algorithm(goodputs, loss_rates, jain_index, covs):
-    """基于评分公式动态计算最佳TCP算法（非硬编码）"""
+def get_best_algorithm(goodputs, loss_rates, jain_indices, covs):
     tcp_algos = ['cubic', 'reno', 'yeah', 'vegas']
     scores = []
-    for i in range(4):
-        # 评分公式：吞吐量30% + 丢包率20%（100-丢包率） + 公平性30% + 稳定性20%（1-CoV）
+    for i in range(len(tcp_algos)):
+
         score = (
             goodputs[i] * 0.3
             + (100 - loss_rates[i]) * 0.2
-            + jain_index * 0.3
+            + jain_indices[i] * 0.3
             + (1 - covs[i]) * 0.2
         )
         scores.append(score)
-    best_idx = np.argmax(scores)  # 评分最高的索引
+    best_idx = int(np.argmax(scores))
     best_algo = tcp_algos[best_idx]
     best_score = scores[best_idx]
     return best_algo, best_score, best_idx
 
 
-def summarize_conclusion(goodputs, loss_rates, jain_index, covs):
-    tcp_algos = ['cubic', 'reno', 'yeah', 'vegas']
-    # 综合评估：吞吐量（高）、丢包率（低）、公平性（Jain指数高）、稳定性（CoV低）
-    scores = []
-    for i in range(4):
-        score = (
-            goodputs[i] * 0.3  # 吞吐量权重30%
-            + (100 - loss_rates[i]) * 0.2  # 丢包率权重20%
-            + jain_index * 0.3  # 公平性权重30%
-            + (1 - covs[i]) * 0.2  # 稳定性权重20%
-        )
-        scores.append(score)
-    best_idx = np.argmax(scores)
-    print("\n=== 综合结论 ===")
-    print(f"在当前拓扑下，最佳TCP算法为 {tcp_algos[best_idx]}。")
-    print(f"理由：其吞吐量({goodputs[best_idx]:.2f} Mbps)最高，丢包率({loss_rates[best_idx]:.2f}%)最低，")
-    print(f"Jain公平指数({jain_index:.4f})接近理想值，且吞吐量变异系数({covs[best_idx]:.4f})最小，综合性能最优。")
 
-def generate_detailed_analysis(goodputs, loss_rates, jain_index, covs, throughputs, fairest_algo, most_stable_algo):
+def generate_detailed_analysis(goodputs, loss_rates, jain_indices, covs, per_algo_flows, fairest_algo, most_stable_algo):
     """Generate detailed performance analysis report in English"""
     tcp_algos = ['cubic', 'reno', 'yeah', 'vegas']
     
     print("\n" + "="*80)
     print("PART A DETAILED ANALYSIS REPORT")
     print("="*80)
-
-
-
-
-
-    # 1. Basic performance table
-    print("\n📊 BASIC PERFORMANCE METRICS:")
+    # 1. Basic performance table (averaged over 2 flows)
+    print("\nBASIC PERFORMANCE METRICS (averaged over 2 flows):")
     basic_df = pd.DataFrame({
         'Algorithm': tcp_algos,
         'Goodput(Mbps)': [f"{x:.4f}" for x in goodputs],
         'LossRate(%)': [f"{x:.4f}" for x in loss_rates],
-        'CoV': [f"{x:.4f}" for x in covs]
+        'CoV': [f"{x:.4f}" for x in covs],
+        'JainIndex': [f"{x:.4f}" for x in jain_indices],
     })
     print(basic_df.to_string(index=False))
     # 2. Jain's Fairness Index Analysis
-    print(f"\n⚖️ JAIN'S FAIRNESS INDEX ANALYSIS (Last 1/3 Duration):")
-    print(f"  Overall Jain Index: {jain_index:.4f}")
-    print(f"  Throughputs per algorithm: {dict(zip(tcp_algos, throughputs))}")    
-    print(f"  Fairest Algorithm: {fairest_algo}")
-    print(f"  Explanation: Jain's Index of {jain_index:.4f} indicates {'excellent' if jain_index > 0.85 else 'good' if jain_index > 0.7 else 'moderate'} fairness.")
-    print(f"               Higher values (closer to 1.0) mean more equal bandwidth distribution. {fairest_algo} has the smallest deviation from average throughput, making it the fairest.")
-   
-
-
-    print(f"\n📈 THROUGHPUT STABILITY ANALYSIS (Coefficient of Variation):")
+    print(f"\n️JAIN'S FAIRNESS INDEX ANALYSIS (Last 1/3 Duration, fairness between 2 flows per algorithm):")
+    for algo, jain, flows in zip(tcp_algos, jain_indices, per_algo_flows):
+        print(f"  {algo}: Jain = {jain:.4f}, flow throughputs = {[f'{x:.4f}' for x in flows]} Mbps")
+    best_jain = jain_indices[tcp_algos.index(fairest_algo)]
+    print(f"\n  Fairest Algorithm: {fairest_algo}")
+    print(f"  Explanation: A higher Jain index (closer to 1.0) means more equal bandwidth sharing between the two flows.")
+    print(f"               {fairest_algo} achieves the highest Jain index ({best_jain:.4f}), so it provides the most balanced sharing.")
+    # 3. Stability Analysis
+    print(f"\nTHROUGHPUT STABILITY ANALYSIS (Coefficient of Variation, averaged over 2 flows):")
     print(f"  Most Stable Algorithm: {most_stable_algo} (CoV = {covs[tcp_algos.index(most_stable_algo)]:.4f})")
     print(f"\n  Stability Mechanism Explanation:")
-    print(f"  • {most_stable_algo.upper()} uses hybrid congestion control: combining RTT-based prediction (like Vegas) and loss-based recovery (like Cubic).")
-    print(f"  • This avoids aggressive window growth (reduces oscillations) and precise loss recovery (minimizes throughput drops).")
-    print(f"  • In contrast, Vegas is too delay-sensitive (high CoV), while Cubic/Reno have volatile window adjustments (higher CoV than {most_stable_algo}).")
-  
- # return None, most_stable_algo
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    print(f"  • A smaller CoV means the per-second throughput fluctuates less, i.e., the algorithm sends more smoothly over time.")
+    print(f"  • The most stable variant reacts more gently to congestion signals, avoiding large oscillations in sending rate.")
+    print(f"  • Variants with larger CoV tend to have more aggressive window growth/backoff, which leads to visible throughput oscillations.")
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
+    
+    # Fairness graph: Jain index for each algorithm
+    ax1.bar(tcp_algos, jain_indices, color=['cyan', 'magenta', 'yellow', 'blue'])
+    ax1.set_ylabel('Jain Index')
+    ax1.set_title("TCP Algorithm vs Jain's Fairness Index")
+    ax2.bar(tcp_algos, covs, color=['cyan', 'magenta', 'yellow', 'blue'])
+    ax2.set_xlabel('TCP Algorithm')
+    ax2.set_ylabel('Coefficient of Variation (CoV)')
+    ax2.set_title('TCP Algorithm vs Throughput Stability (CoV)')
+    
+    plt.tight_layout()
+    plt.savefig('fairness_stability_comparison.png')
+    plt.show()
 
 
 if __name__ == "__main__":
-    goodputs, loss_rates =generate_table_and_plot()
-    jain_index, throughputs, fairest_algo = calculate_jain_fairness()
-    covs,most_stable_algo = calculate_throughput_cov()
-    best_algo, best_score, best_idx = get_best_algorithm(goodputs, loss_rates, jain_index, covs)
+    # Step 1: Generate table and plot
+    goodputs, loss_rates = generate_table_and_plot()
     
+    # Step 2: Calculate Jain fairness index
+    jain_indices, per_algo_flows, fairest_algo = calculate_jain_fairness()
+    # Step 3: Calculate throughput stability (CoV)
+    covs, most_stable_algo = calculate_throughput_cov()
+    # Step 4: Get the best algorithm based on the calculated metrics
+    best_algo, best_score, best_idx = get_best_algorithm(goodputs, loss_rates, jain_indices, covs)
     
-    generate_detailed_analysis(goodputs, loss_rates, jain_index, covs, throughputs, fairest_algo, most_stable_algo) 
-  
-    
+    # Step 5: Generate detailed analysis report
+    generate_detailed_analysis(goodputs, loss_rates, jain_indices, covs, per_algo_flows, fairest_algo, most_stable_algo) 
+# Final conclusion
     print("\n" + "="*50)
     print("FINAL CONCLUSION")
     print("="*50)
     print(f"Under the current network topology, {best_algo.upper()} is the best TCP algorithm (total score: {best_score:.4f}).")
-    throughput_rank = sorted(range(4), key=lambda i: goodputs[i], reverse=True).index(best_idx) + 1
-    loss_rank = sorted(range(4), key=lambda i: loss_rates[i]).index(best_idx) + 1
-    
+    throughput_rank = sorted(range(len(goodputs)), key=lambda i: goodputs[i], reverse=True).index(best_idx) + 1
+    loss_rank = sorted(range(len(loss_rates)), key=lambda i: loss_rates[i]).index(best_idx) + 1
     print(f"\nDetailed Justification:")
-    print(f"1. Throughput: {goodputs[best_idx]:.4f} Mbps (Rank: {throughput_rank}/4)")
-    print(f"2. Packet Loss: {loss_rates[best_idx]:.4f}% (Rank: {loss_rank}/4)")
-    print(f"3. Fairness: Contributes to Jain Index {jain_index:.4f} (fairness aligned with {fairest_algo})")
-    print(f"4. Stability: Lowest CoV ({covs[best_idx]:.4f}) — more stable than other algorithms.")
-    
+    print(f"1. Average Goodput: {goodputs[best_idx]:.4f} Mbps (Rank: {throughput_rank}/4)")
+    print(f"2. Average Packet Loss: {loss_rates[best_idx]:.4f}% (Rank: {loss_rank}/4)")
+    print(f"3. Fairness: Jain index for this variant = {jain_indices[best_idx]:.4f} (higher means more equal sharing between its two flows).")
+    print(f"4. Stability: CoV = {covs[best_idx]:.4f} — lower CoV implies smoother throughput over time.")
     print(f"\nRecommended Scenarios:")
-    print(f"  • Real-time apps (video conferencing, VoIP) needing low loss and stable bandwidth.")
-    print(f"  • Mixed TCP traffic environments requiring fair coexistence.")
-    print(f"  • Latency-sensitive scenarios where stable throughput is critical.")
+    print(f"  • Real-time apps (video conferencing, VoIP) needing low loss and reasonably high, stable throughput.")
+    print(f"  • Mixed TCP traffic environments requiring fair bandwidth sharing between concurrent flows.")
+    print(f"  • Latency-sensitive scenarios where avoiding large oscillations in sending rate is important.")
