@@ -269,74 +269,79 @@ def generate_statistics_table(results):
 
 def plot_results_with_ci(metrics):
     """
-    Generate publication-quality plots showing each run's value with 95% CI overlay.
-    Each subplot shows 5 bars (one per run) with values labeled and CI band.
+    Clean academic style: bars with error bars, minimal decorations.
     """
-    fig, axes = plt.subplots(2, 2, figsize=(16, 11))
-    fig.suptitle('Part C: Reproducibility Analysis - TCP Yeah with RED Queue', 
-                 fontsize=14, fontweight='bold', y=0.995)
+    # Use seaborn style for cleaner look
+    plt.style.use('seaborn-v0_8-whitegrid')
     
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+    fig.suptitle('Reproducibility Analysis: TCP Yeah with RED Queue (n=5 runs)', 
+                 fontsize=13, y=0.98)
+    
+    # Color palette: professional and distinct
+    colors = ['#2E86AB', '#A23B72', '#F18F01', '#06A77D']
     metric_configs = [
-        ('Goodput (Mbps)', 'Goodput (Mbps)', 'green', axes[0, 0]),
-        ('PLR (%)', 'Packet Loss Rate (%)', 'red', axes[0, 1]),
-        ('Jain Index', 'Jain\'s Fairness Index', 'blue', axes[1, 0]),
-        ('CoV', 'Coefficient of Variation', 'orange', axes[1, 1])
+        ('Goodput (Mbps)', 'Goodput (Mbps)', colors[0], axes[0, 0]),
+        ('PLR (%)', 'Packet Loss Rate (%)', colors[1], axes[0, 1]),
+        ('Jain Index', 'Jain\'s Fairness Index', colors[2], axes[1, 0]),
+        ('CoV', 'Coefficient of Variation', colors[3], axes[1, 1])
     ]
     
     for metric_name, ylabel, color, ax in metric_configs:
         values = metrics[metric_name]
         mean, lower, upper, margin = calculate_confidence_interval(values)
         
-        # Plot individual runs as bars
-        runs = ['Run 1', 'Run 2', 'Run 3', 'Run 4', 'Run 5']
+        runs = ['1', '2', '3', '4', '5']
         x_pos = np.arange(len(runs))
         
-        bars = ax.bar(x_pos, values, color=color, alpha=0.7, edgecolor='black', linewidth=1.5, width=0.6)
+        # Modern bar style with gradient effect
+        bars = ax.bar(x_pos, values, color=color, alpha=0.85, 
+                     edgecolor='white', linewidth=2, width=0.65)
         
-        # Adjust y-axis limits for better granularity
+        # Add subtle gradient to bars
+        for bar in bars:
+            bar.set_edgecolor('darkgray')
+            bar.set_linewidth(1)
+        
+        # Adjust y-axis for better visibility
         data_range = max(values) - min(values)
         if data_range > 0:
-            y_margin = data_range * 0.3  # Add 30% margin
+            y_margin = data_range * 0.25
             ax.set_ylim(min(values) - y_margin, max(values) + y_margin)
         else:
-            # If all values are the same, center around the value
             y_center = values[0]
-            ax.set_ylim(y_center * 0.95, y_center * 1.05)
+            ax.set_ylim(y_center * 0.98, y_center * 1.02)
         
-        # Add value labels on each bar
-        for i, (bar, val) in enumerate(zip(bars, values)):
+        # Value labels on bars (clean, small)
+        for bar, val in zip(bars, values):
             height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height,
-                   f'{val:.4f}',
-                   ha='center', va='bottom', fontsize=9, fontweight='bold')
+            ax.text(bar.get_x() + bar.get_width()/2., height + data_range*0.02,
+                   f'{val:.3f}',
+                   ha='center', va='bottom', fontsize=8)
         
-        # Draw horizontal lines for mean and CI bounds
-        ax.axhline(y=mean, color='black', linestyle='--', linewidth=2, 
-                  label=f'Mean: {mean:.4f}', alpha=0.8, zorder=3)
-        ax.axhline(y=lower, color='darkgray', linestyle=':', linewidth=1.5, 
-                  label=f'95% CI: [{lower:.4f}, {upper:.4f}]', alpha=0.6, zorder=3)
-        ax.axhline(y=upper, color='darkgray', linestyle=':', linewidth=1.5, alpha=0.6, zorder=3)
+        # Mean line (bold, clear)
+        ax.axhline(y=mean, color='black', linestyle='-', linewidth=1.8, 
+                  alpha=0.7, zorder=2)
         
-        # Fill the confidence interval region
-        ax.fill_between([-0.5, len(runs)-0.5], lower, upper, alpha=0.15, color=color, 
-                       label=f'CI Width: ±{margin:.4f}', zorder=1)
+        # CI band (subtle)
+        ax.fill_between([-0.5, len(runs)-0.5], lower, upper, 
+                       alpha=0.2, color=color, zorder=1)
         
         # Formatting
-        ax.set_ylabel(ylabel, fontsize=10, fontweight='bold')
-        ax.set_xlabel('Run Number', fontsize=9)
-        ax.set_title(f'{ylabel}', fontsize=11, fontweight='bold', pad=10)
+        ax.set_ylabel(ylabel, fontsize=10)
+        ax.set_xlabel('Run', fontsize=9)
+        ax.set_title(ylabel, fontsize=11, pad=8, fontweight='600')
         ax.set_xticks(x_pos)
-        ax.set_xticklabels(runs, fontsize=8)
-        ax.grid(axis='y', alpha=0.3, linestyle='--', zorder=0)
-        ax.legend(fontsize=7, loc='best', framealpha=0.95)
+        ax.set_xticklabels(runs, fontsize=9)
+        ax.tick_params(axis='both', which='major', labelsize=8)
         
-        # Add statistics box
+        # Simplified annotation
         std_val = np.std(values, ddof=1)
-        cv_val = (std_val/mean*100) if mean != 0 else 0
-        stats_text = f'Mean: {mean:.4f}\nStd: {std_val:.4f}\nCV: {cv_val:.2f}%'
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-               fontsize=7, verticalalignment='top',
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        annotation = f'μ={mean:.3f}, 95% CI=[{lower:.3f}, {upper:.3f}]'
+        ax.text(0.98, 0.02, annotation, transform=ax.transAxes,
+               fontsize=7, ha='right', va='bottom',
+               bbox=dict(boxstyle='round,pad=0.4', facecolor='white', 
+                        edgecolor='gray', alpha=0.8))
     
     plt.tight_layout(rect=[0, 0, 1, 0.99])
     plt.savefig('partC_reproducibility_analysis.png', dpi=300, bbox_inches='tight')
@@ -344,52 +349,6 @@ def plot_results_with_ci(metrics):
     plt.show()
 
 
-def plot_run_comparison(results):
-    """
-    Generate comparison plot showing all 5 runs side by side.
-    """
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle('Part C: Run-by-Run Comparison - TCP Yeah with RED Queue', 
-                 fontsize=14, fontweight='bold')
-    
-    runs = [r['run'] for r in results]
-    
-    # Goodput comparison
-    ax = axes[0, 0]
-    ax.plot(runs, [r['goodput'] for r in results], 'o-', color='green', linewidth=2, markersize=8)
-    ax.set_xlabel('Run Number')
-    ax.set_ylabel('Goodput (Mbps)')
-    ax.set_title('Goodput Across Runs')
-    ax.grid(True, alpha=0.3)
-    
-    # PLR comparison
-    ax = axes[0, 1]
-    ax.plot(runs, [r['plr'] for r in results], 'o-', color='red', linewidth=2, markersize=8)
-    ax.set_xlabel('Run Number')
-    ax.set_ylabel('Packet Loss Rate (%)')
-    ax.set_title('PLR Across Runs')
-    ax.grid(True, alpha=0.3)
-    
-    # Jain Index comparison
-    ax = axes[1, 0]
-    ax.plot(runs, [r['jain_index'] for r in results], 'o-', color='blue', linewidth=2, markersize=8)
-    ax.set_xlabel('Run Number')
-    ax.set_ylabel('Jain Index')
-    ax.set_title('Fairness Across Runs')
-    ax.grid(True, alpha=0.3)
-    
-    # CoV comparison
-    ax = axes[1, 1]
-    ax.plot(runs, [r['cov'] for r in results], 'o-', color='orange', linewidth=2, markersize=8)
-    ax.set_xlabel('Run Number')
-    ax.set_ylabel('CoV')
-    ax.set_title('Stability Across Runs')
-    ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig('partC_run_comparison.png', dpi=300, bbox_inches='tight')
-    print("✓ Comparison plot saved to: partC_run_comparison.png")
-    plt.show()
 
 
 def main():
@@ -422,7 +381,6 @@ def main():
     
     # Generate plots
     plot_results_with_ci(metrics)
-    plot_run_comparison(results)
     
     # Summary conclusion
     print("\n" + "="*80)
