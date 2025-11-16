@@ -27,8 +27,11 @@ if {$argc >= 2} {
 }
 
 # Set random seed for reproducibility
+# Configure default RNG for ns2
 set rng [new RNG]
 $rng seed $seed
+$ns use-scheduler Heap
+$ns random-seed $seed
 puts "Running simulation with seed: $seed, suffix: $suffix"
 
 $ns color 1 Blue
@@ -64,6 +67,18 @@ $ns duplex-link $n4 $n6 4000Mb 800ms DropTail
 
 $ns queue-limit $n3 $n4 10
 $ns queue-limit $n4 $n3 10
+
+# Configure RED queue parameters for randomness
+set redq [[$ns link $n3 $n4] queue]
+$redq set thresh_ 5
+$redq set maxthresh_ 10
+$redq set q_weight_ 0.002
+$redq set linterm_ 10
+$redq set bytes_ false
+$redq set queue_in_bytes_ false
+$redq set wait_ true
+$redq set setbit_ false
+$redq set gentle_ false
 
 $ns duplex-link-op $n1 $n3 orient right-down
 $ns duplex-link-op $n2 $n3 orient right-up
@@ -121,9 +136,18 @@ $myftp1 attach-agent $source1
 set myftp2 [new Application/FTP]
 $myftp2 attach-agent $source2
 
-# Add random start-time jitter for reproducibility testing
-set jitter1 [expr {rand() * 0.01}]  ;# 0-10ms jitter
-set jitter2 [expr {rand() * 0.01}]  ;# 0-10ms jitter
+# Add random start-time jitter using the seeded RNG
+set rng_jitter [new RNG]
+$rng_jitter seed [expr $seed + 100]
+set rv_jitter [new RandomVariable/Uniform]
+$rv_jitter set min_ 0.0
+$rv_jitter set max_ 0.05
+$rv_jitter use-rng $rng_jitter
+
+set jitter1 [$rv_jitter value]
+set jitter2 [$rv_jitter value]
+
+puts "Start times: FTP1=$jitter1, FTP2=$jitter2"
 
 $ns at $jitter1 "$myftp1 start"
 $ns at $jitter2 "$myftp2 start"
