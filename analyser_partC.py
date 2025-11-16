@@ -271,8 +271,16 @@ def plot_results_with_ci(metrics):
     """
     Clean academic style: bars with error bars, minimal decorations.
     """
-    # Use seaborn style for cleaner look
-    plt.style.use('seaborn-v0_8-whitegrid')
+    # Use available style
+    try:
+        plt.style.use('seaborn-whitegrid')
+    except:
+        try:
+            plt.style.use('seaborn-v0_8-whitegrid')
+        except:
+            # Fallback to default with custom settings
+            plt.rcParams['axes.grid'] = True
+            plt.rcParams['grid.alpha'] = 0.3
     
     fig, axes = plt.subplots(2, 2, figsize=(16, 10))
     fig.suptitle('Reproducibility Analysis: TCP Yeah with RED Queue (n=5 runs)', 
