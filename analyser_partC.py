@@ -269,11 +269,12 @@ def generate_statistics_table(results):
 
 def plot_results_with_ci(metrics):
     """
-    Generate publication-quality plots with error bars showing 95% CI.
+    Generate publication-quality plots showing each run's value with 95% CI overlay.
+    Each subplot shows 5 bars (one per run) with values labeled and CI band.
     """
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle('Part C: Reproducibility Analysis - TCP Yeah with RED Queue\n(Mean ± 95% Confidence Interval, n=5)', 
-                 fontsize=14, fontweight='bold')
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle('Part C: Reproducibility Analysis - TCP Yeah with RED Queue\n(Individual Runs with 95% Confidence Interval)', 
+                 fontsize=15, fontweight='bold')
     
     metric_configs = [
         ('Goodput (Mbps)', 'Goodput (Mbps)', 'green', axes[0, 0]),
@@ -286,21 +287,44 @@ def plot_results_with_ci(metrics):
         values = metrics[metric_name]
         mean, lower, upper, margin = calculate_confidence_interval(values)
         
-        # Bar plot with error bars
-        ax.bar(['TCP Yeah\n(RED)'], [mean], color=color, alpha=0.7, edgecolor='black', linewidth=1.5)
-        ax.errorbar(['TCP Yeah\n(RED)'], [mean], yerr=[margin], 
-                   fmt='none', ecolor='black', capsize=10, capthick=2, linewidth=2)
+        # Plot individual runs as bars
+        runs = ['Run 1', 'Run 2', 'Run 3', 'Run 4', 'Run 5']
+        x_pos = np.arange(len(runs))
         
-        # Add value labels
-        ax.text(0, mean + margin + 0.02 * mean, f'{mean:.4f}\n±{margin:.4f}', 
-               ha='center', va='bottom', fontweight='bold', fontsize=10)
+        bars = ax.bar(x_pos, values, color=color, alpha=0.7, edgecolor='black', linewidth=1.5)
         
+        # Add value labels on each bar
+        for i, (bar, val) in enumerate(zip(bars, values)):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                   f'{val:.4f}',
+                   ha='center', va='bottom', fontsize=9, fontweight='bold')
+        
+        # Draw horizontal lines for mean and CI bounds
+        ax.axhline(y=mean, color='black', linestyle='--', linewidth=2, 
+                  label=f'Mean: {mean:.4f}', alpha=0.8)
+        ax.axhline(y=lower, color='darkgray', linestyle=':', linewidth=1.5, 
+                  label=f'95% CI: [{lower:.4f}, {upper:.4f}]', alpha=0.6)
+        ax.axhline(y=upper, color='darkgray', linestyle=':', linewidth=1.5, alpha=0.6)
+        
+        # Fill the confidence interval region
+        ax.fill_between(x_pos, lower, upper, alpha=0.15, color=color, 
+                       label=f'CI Width: ±{margin:.4f}')
+        
+        # Formatting
         ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
-        ax.set_title(f'{ylabel}\n(n=5 runs)', fontsize=11)
+        ax.set_xlabel('Run Number', fontsize=10, fontweight='bold')
+        ax.set_title(f'{ylabel}', fontsize=12, fontweight='bold')
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(runs, fontsize=9)
         ax.grid(axis='y', alpha=0.3, linestyle='--')
+        ax.legend(fontsize=8, loc='best', framealpha=0.9)
         
-        # Add horizontal line for reference
-        ax.axhline(y=mean, color=color, linestyle='--', alpha=0.5, linewidth=1)
+        # Add statistics box
+        stats_text = f'Mean: {mean:.4f}\nStd: {np.std(values, ddof=1):.4f}\nCV: {(np.std(values, ddof=1)/mean*100):.2f}%'
+        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+               fontsize=8, verticalalignment='top',
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
     
     plt.tight_layout()
     plt.savefig('partC_reproducibility_analysis.png', dpi=300, bbox_inches='tight')
