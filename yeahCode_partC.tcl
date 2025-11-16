@@ -136,7 +136,7 @@ set rng_jitter [new RNG]
 $rng_jitter seed [expr $seed + 100]
 set rv_jitter [new RandomVariable/Uniform]
 $rv_jitter set min_ 0.0
-$rv_jitter set max_ 0.05
+$rv_jitter set max_ 2.0
 $rv_jitter use-rng $rng_jitter
 
 set jitter1 [$rv_jitter value]
