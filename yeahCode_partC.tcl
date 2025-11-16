@@ -16,7 +16,7 @@ set ns [new Simulator]
 if {$argc >= 1} {
     set seed [lindex $argv 0]
 } else {
-    set seed 42
+    set seed 22207256
 }
 
 # Get output suffix from command line, default to "0"
@@ -58,7 +58,7 @@ set n6 [$ns node]
 
 $ns duplex-link $n1 $n3 4000Mb 500ms DropTail
 $ns duplex-link $n2 $n3 4000Mb 800ms DropTail 
-$ns duplex-link $n3 $n4 1000Mb 50ms DropTail
+$ns duplex-link $n3 $n4 1000Mb 50ms RED
 $ns duplex-link $n4 $n5 4000Mb 500ms DropTail
 $ns duplex-link $n4 $n6 4000Mb 800ms DropTail
 
@@ -121,9 +121,12 @@ $myftp1 attach-agent $source1
 set myftp2 [new Application/FTP]
 $myftp2 attach-agent $source2
 
+# Add random start-time jitter for reproducibility testing
+set jitter1 [expr {rand() * 0.01}]  ;# 0-10ms jitter
+set jitter2 [expr {rand() * 0.01}]  ;# 0-10ms jitter
 
-$ns at 0.0 "$myftp2 start"
-$ns at 0.0 "$myftp1 start"
+$ns at $jitter1 "$myftp1 start"
+$ns at $jitter2 "$myftp2 start"
 
 $ns at 100.0 "finish"
 
