@@ -284,7 +284,7 @@ def plot_results_with_ci(metrics):
     
     fig, axes = plt.subplots(2, 2, figsize=(16, 10))
     fig.suptitle('Reproducibility Analysis: TCP Yeah with RED Queue (n=5 runs)', 
-                 fontsize=13, y=0.98)
+                 fontsize=10, y=0.98)
     
     # Color palette: professional and distinct
     colors = ['#2E86AB', '#A23B72', '#F18F01', '#06A77D']
