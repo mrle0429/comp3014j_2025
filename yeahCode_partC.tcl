@@ -26,12 +26,7 @@ if {$argc >= 2} {
     set suffix "0"
 }
 
-# Set random seed for reproducibility
-# Configure default RNG for ns2
-set rng [new RNG]
-$rng seed $seed
-$ns use-scheduler Heap
-$ns random-seed $seed
+# Display simulation parameters
 puts "Running simulation with seed: $seed, suffix: $suffix"
 
 $ns color 1 Blue
