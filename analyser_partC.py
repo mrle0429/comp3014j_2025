@@ -275,110 +275,126 @@ def generate_statistics_table(results):
 
 def plot_results_with_ci(metrics):
     """
-    更合理的可视化：
-    - y 轴从 0 开始（Jain 限制在 [0,1]）
-    - 置信区间显示为全局水平带，但不再显得特别巨大
-    - 对于物理不能为负的指标（goodput / plr / cov），展示时将 CI 下界截断为 0
+    改进版可视化：
+    - 左图：Goodput / Jain / CoV，使用紧缩的 y 轴范围，放大细微波动
+    - 右图：PLR 单独展示，避免量级差异把其他指标“压扁”
+    - 都显示 Mean ± 95% CI 误差条
     """
-    # 尽量使用干净的网格风格
-    try:
-        plt.style.use('seaborn-whitegrid')
-    except:
-        try:
-            plt.style.use('seaborn-v0_8-whitegrid')
-        except:
-            plt.rcParams['axes.grid'] = True
-            plt.rcParams['grid.alpha'] = 0.3
-    
-    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
-    metric_configs = [
-        ('Goodput (Mbps)', 'Goodput (Mbps)', colors[0], axes[0, 0]),
-        ('PLR (%)', 'Packet Loss Rate (%)', colors[1], axes[0, 1]),
-        ('Jain Index', 'Jain\'s Fairness Index', colors[2], axes[1, 0]),
-        ('CoV', 'Coefficient of Variation', colors[3], axes[1, 1])
-    ]
-    
-    runs = ['1', '2', '3', '4', '5']
-    x_pos = np.arange(len(runs))
-    
-    for metric_name, ylabel, color, ax in metric_configs:
-        values = metrics[metric_name]
+    # 方便对照：我们用 calculate_confidence_interval 来统一算 mean / CI
+    def _get_stats(values):
         mean, lower, upper, margin = calculate_confidence_interval(values)
+        return mean, lower, upper, margin
 
-        # 物理下界：这些指标都不应该为负
-        physical_min = 0.0
-        # Jain 指数理论上在 [0,1]
-        physical_max = 1.0 if metric_name == 'Jain Index' else None
+    # 指标名称（和你前面保持一致）
+    metric_small = ["Goodput (Mbps)", "Jain Index", "CoV"]
+    metric_plr = "PLR (%)"
 
-        # 用于绘图的 CI（截断到物理合理范围）
-        display_lower = max(lower, physical_min)
-        display_upper = upper if physical_max is None else min(upper, physical_max)
+    # 准备数据
+    small_stats = []
+    for name in metric_small:
+        vals = metrics[name]
+        mean, lower, upper, margin = _get_stats(vals)
+        small_stats.append((name, np.array(vals), mean, lower, upper, margin))
 
-        # 柱状图
-        bars = ax.bar(
-            x_pos, values,
-            color=color, alpha=0.85,
-            edgecolor='white', linewidth=1.5, width=0.65
+    plr_vals = np.array(metrics[metric_plr])
+    plr_mean, plr_lower, plr_upper, plr_margin = _get_stats(plr_vals)
+
+    # 画图
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    ax1, ax2 = axes
+
+    # ---------------- 左图：Goodput / Jain / CoV（放大纵轴范围） ----------------
+    x_small = np.arange(len(metric_small))
+    means_small = np.array([s[2] for s in small_stats])
+    lowers_small = np.array([s[3] for s in small_stats])
+    uppers_small = np.array([s[4] for s in small_stats])
+
+    # 误差条长度
+    yerr_small = np.vstack([means_small - lowers_small,
+                            uppers_small - means_small])
+
+    bars1 = ax1.bar(
+        x_small,
+        means_small,
+        yerr=yerr_small,
+        capsize=5,
+        width=0.6,
+        alpha=0.9,
+        edgecolor="black"
+    )
+    ax1.set_xticks(x_small)
+    ax1.set_xticklabels(metric_small, rotation=15, ha="right", fontsize=9)
+    ax1.set_ylabel("Value", fontsize=10)
+    ax1.set_title("Mean ± 95% CI (Zoomed)", fontsize=11)
+
+    # 根据 CI 自动缩放 y 轴，让细微波动更明显
+    y_min = lowers_small.min()
+    y_max = uppers_small.max()
+    # 防止范围为 0 的情况
+    if y_max - y_min < 1e-6:
+        margin = max(1e-3, y_max * 0.05)
+    else:
+        margin = (y_max - y_min) * 0.3
+    ax1.set_ylim(y_min - margin, y_max + margin)
+
+    # 在柱子上标数值
+    for bar, mean in zip(bars1, means_small):
+        height = bar.get_height()
+        ax1.text(
+            bar.get_x() + bar.get_width() / 2,
+            height,
+            f"{mean:.4f}",
+            ha="center",
+            va="bottom",
+            fontsize=8
         )
-        for bar in bars:
-            bar.set_edgecolor('darkgray')
-            bar.set_linewidth(1)
 
-        # 统一从 0（或物理下界）开始画 y 轴
-        max_val = max(max(values), display_upper)
-        if physical_max is not None:
-            upper_ylim = min(physical_max, max_val * 1.1)
-        else:
-            upper_ylim = max_val * 1.1 if max_val > 0 else 1.0
+    # ---------------- 右图：PLR 单独画 ----------------
+    x_plr = np.array([0])
+    yerr_plr = np.vstack([[plr_mean - plr_lower],
+                          [plr_upper - plr_mean]])
 
-        ax.set_ylim(physical_min, upper_ylim)
+    bars2 = ax2.bar(
+        x_plr,
+        [plr_mean],
+        yerr=yerr_plr,
+        capsize=5,
+        width=0.4,
+        alpha=0.9,
+        edgecolor="black"
+    )
+    ax2.set_xticks(x_plr)
+    ax2.set_xticklabels([metric_plr], fontsize=9)
+    ax2.set_ylabel("PLR (%)", fontsize=10)
+    ax2.set_title("PLR Mean ± 95% CI", fontsize=11)
 
-        # 在柱子上标注数值
-        offset = (upper_ylim - physical_min) * 0.02
-        for bar, val in zip(bars, values):
-            height = bar.get_height()
-            ax.text(
-                bar.get_x() + bar.get_width() / 2., height + offset,
-                f'{val:.3f}',
-                ha='center', va='bottom', fontsize=8
-            )
+    # PLR 的 y 轴从 0 开始，更直观
+    y_min_plr = max(0.0, plr_lower)
+    y_max_plr = plr_upper
+    if y_max_plr - y_min_plr < 1e-6:
+        margin_plr = max(1e-3, y_max_plr * 0.05)
+    else:
+        margin_plr = (y_max_plr - y_min_plr) * 0.3
+    ax2.set_ylim(y_min_plr - margin_plr, y_max_plr + margin_plr)
 
-        # 均值线
-        ax.axhline(
-            y=mean, color='black', linestyle='-', linewidth=1.6,
-            alpha=0.8, zorder=2
+    for bar in bars2:
+        height = bar.get_height()
+        ax2.text(
+            bar.get_x() + bar.get_width() / 2,
+            height,
+            f"{plr_mean:.4f}",
+            ha="center",
+            va="bottom",
+            fontsize=8
         )
 
-        # CI 带（全图水平，截断后的区间）
-        ax.fill_between(
-            [-0.5, len(runs) - 0.5],
-            display_lower, display_upper,
-            alpha=0.15, color=color, zorder=1
-        )
-
-        # 坐标轴 & 标题
-        ax.set_ylabel(ylabel, fontsize=10)
-        ax.set_xlabel('Run', fontsize=9)
-        ax.set_title(ylabel, fontsize=11, pad=8, fontweight='600')
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(runs, fontsize=9)
-        ax.tick_params(axis='both', which='major', labelsize=8)
-
-        # 注释（仍然用真实 CI，不截断，便于你在图和表之间对照）
-        annotation = f'μ={mean:.3f}, 95% CI=[{lower:.3f}, {upper:.3f}]'
-        ax.text(
-            0.98, 0.02, annotation, transform=ax.transAxes,
-            fontsize=7, ha='right', va='bottom',
-            bbox=dict(boxstyle='round,pad=0.4',
-                      facecolor='white', edgecolor='gray', alpha=0.8)
-        )
-    
-    plt.tight_layout(rect=[0, 0, 1, 0.99])
-    plt.savefig('partC_reproducibility_analysis.png', dpi=300, bbox_inches='tight')
+    plt.tight_layout()
+    plt.savefig("partC_reproducibility_analysis.png", dpi=300, bbox_inches="tight")
     print("\n✓ Plot saved to: partC_reproducibility_analysis.png")
-    plt.show()
+    # 如果你不想在命令行弹窗看图，可以注释掉下面这行
+    # plt.show()
+    plt.close()
+
 
 
 
