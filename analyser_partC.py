@@ -275,24 +275,23 @@ def generate_statistics_table(results):
 
 def plot_results_with_ci(metrics):
     """
-    Clean academic style: bars with error bars, minimal decorations.
+    更合理的可视化：
+    - y 轴从 0 开始（Jain 限制在 [0,1]）
+    - 置信区间显示为全局水平带，但不再显得特别巨大
+    - 对于物理不能为负的指标（goodput / plr / cov），展示时将 CI 下界截断为 0
     """
-    # Use available style
+    # 尽量使用干净的网格风格
     try:
         plt.style.use('seaborn-whitegrid')
     except:
         try:
             plt.style.use('seaborn-v0_8-whitegrid')
         except:
-            # Fallback to default with custom settings
             plt.rcParams['axes.grid'] = True
             plt.rcParams['grid.alpha'] = 0.3
     
     fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-    # fig.suptitle('Reproducibility Analysis: TCP Yeah with RED Queue (n=5 runs)', 
-    #              fontsize=10, y=0.98)
-    
-    # Color palette: professional and distinct
+
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
     metric_configs = [
         ('Goodput (Mbps)', 'Goodput (Mbps)', colors[0], axes[0, 0]),
@@ -301,66 +300,86 @@ def plot_results_with_ci(metrics):
         ('CoV', 'Coefficient of Variation', colors[3], axes[1, 1])
     ]
     
+    runs = ['1', '2', '3', '4', '5']
+    x_pos = np.arange(len(runs))
+    
     for metric_name, ylabel, color, ax in metric_configs:
         values = metrics[metric_name]
         mean, lower, upper, margin = calculate_confidence_interval(values)
-        
-        runs = ['1', '2', '3', '4', '5']
-        x_pos = np.arange(len(runs))
-        
-        # Modern bar style with gradient effect
-        bars = ax.bar(x_pos, values, color=color, alpha=0.85, 
-                     edgecolor='white', linewidth=2, width=0.65)
-        
-        # Add subtle gradient to bars
+
+        # 物理下界：这些指标都不应该为负
+        physical_min = 0.0
+        # Jain 指数理论上在 [0,1]
+        physical_max = 1.0 if metric_name == 'Jain Index' else None
+
+        # 用于绘图的 CI（截断到物理合理范围）
+        display_lower = max(lower, physical_min)
+        display_upper = upper if physical_max is None else min(upper, physical_max)
+
+        # 柱状图
+        bars = ax.bar(
+            x_pos, values,
+            color=color, alpha=0.85,
+            edgecolor='white', linewidth=1.5, width=0.65
+        )
         for bar in bars:
             bar.set_edgecolor('darkgray')
             bar.set_linewidth(1)
-        
-        # Adjust y-axis for better visibility
-        data_range = max(values) - min(values)
-        if data_range > 0:
-            y_margin = data_range * 0.25
-            ax.set_ylim(min(values) - y_margin, max(values) + y_margin)
+
+        # 统一从 0（或物理下界）开始画 y 轴
+        max_val = max(max(values), display_upper)
+        if physical_max is not None:
+            upper_ylim = min(physical_max, max_val * 1.1)
         else:
-            y_center = values[0]
-            ax.set_ylim(y_center * 0.98, y_center * 1.02)
-        
-        # Value labels on bars (clean, small)
+            upper_ylim = max_val * 1.1 if max_val > 0 else 1.0
+
+        ax.set_ylim(physical_min, upper_ylim)
+
+        # 在柱子上标注数值
+        offset = (upper_ylim - physical_min) * 0.02
         for bar, val in zip(bars, values):
             height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height + data_range*0.02,
-                   f'{val:.3f}',
-                   ha='center', va='bottom', fontsize=8)
-        
-        # Mean line (bold, clear)
-        ax.axhline(y=mean, color='black', linestyle='-', linewidth=1.8, 
-                  alpha=0.7, zorder=2)
-        
-        # CI band (subtle)
-        ax.fill_between([-0.5, len(runs)-0.5], lower, upper, 
-                       alpha=0.2, color=color, zorder=1)
-        
-        # Formatting
+            ax.text(
+                bar.get_x() + bar.get_width() / 2., height + offset,
+                f'{val:.3f}',
+                ha='center', va='bottom', fontsize=8
+            )
+
+        # 均值线
+        ax.axhline(
+            y=mean, color='black', linestyle='-', linewidth=1.6,
+            alpha=0.8, zorder=2
+        )
+
+        # CI 带（全图水平，截断后的区间）
+        ax.fill_between(
+            [-0.5, len(runs) - 0.5],
+            display_lower, display_upper,
+            alpha=0.15, color=color, zorder=1
+        )
+
+        # 坐标轴 & 标题
         ax.set_ylabel(ylabel, fontsize=10)
         ax.set_xlabel('Run', fontsize=9)
         ax.set_title(ylabel, fontsize=11, pad=8, fontweight='600')
         ax.set_xticks(x_pos)
         ax.set_xticklabels(runs, fontsize=9)
         ax.tick_params(axis='both', which='major', labelsize=8)
-        
-        # Simplified annotation
-        std_val = np.std(values, ddof=1)
+
+        # 注释（仍然用真实 CI，不截断，便于你在图和表之间对照）
         annotation = f'μ={mean:.3f}, 95% CI=[{lower:.3f}, {upper:.3f}]'
-        ax.text(0.98, 0.02, annotation, transform=ax.transAxes,
-               fontsize=7, ha='right', va='bottom',
-               bbox=dict(boxstyle='round,pad=0.4', facecolor='white', 
-                        edgecolor='gray', alpha=0.8))
+        ax.text(
+            0.98, 0.02, annotation, transform=ax.transAxes,
+            fontsize=7, ha='right', va='bottom',
+            bbox=dict(boxstyle='round,pad=0.4',
+                      facecolor='white', edgecolor='gray', alpha=0.8)
+        )
     
     plt.tight_layout(rect=[0, 0, 1, 0.99])
     plt.savefig('partC_reproducibility_analysis.png', dpi=300, bbox_inches='tight')
     print("\n✓ Plot saved to: partC_reproducibility_analysis.png")
     plt.show()
+
 
 
 
