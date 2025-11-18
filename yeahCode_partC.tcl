@@ -27,9 +27,8 @@ if {$argc >= 2} {
 # Display simulation parameters
 puts "Running simulation with seed: $seed, suffix: $suffix"
 
-# Set global random seed for ns2 (CRITICAL for reproducibility)
-global defaultRNG
-$defaultRNG seed $seed
+# Set ns2 random seed (must be before creating Simulator)
+ns-random $seed
 
 set ns [new Simulator]
 
