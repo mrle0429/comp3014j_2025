@@ -134,10 +134,11 @@ $myftp1 attach-agent $source1
 set myftp2 [new Application/FTP]
 $myftp2 attach-agent $source2
 
-# Fixed start times for reproducibility testing
-# Only seed variation affects the results
-$ns at 0.0 "$myftp1 start"
-$ns at 0.0 "$myftp2 start"
+set start1 0.0
+set start2 [expr rand() * 0.5]
+
+$ns at start1 "$myftp1 start"
+$ns at start2 "$myftp2 start"
 
 $ns at 100.0 "finish"
 
