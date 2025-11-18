@@ -10,8 +10,6 @@
 # Part C: Support for different random seeds
 # Usage: ns yeahCode_partC.tcl <seed> <output_suffix>
 
-set ns [new Simulator]
-
 # Get seed from command line argument, default to 42
 if {$argc >= 1} {
     set seed [lindex $argv 0]
@@ -28,6 +26,12 @@ if {$argc >= 2} {
 
 # Display simulation parameters
 puts "Running simulation with seed: $seed, suffix: $suffix"
+
+# Set global random seed for ns2 (CRITICAL for reproducibility)
+global defaultRNG
+$defaultRNG seed $seed
+
+set ns [new Simulator]
 
 $ns color 1 Blue
 $ns color 2 Red
