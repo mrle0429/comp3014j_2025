@@ -275,14 +275,18 @@ def generate_statistics_table(results):
 
 def plot_results_with_ci(metrics):
     """
-    恢复四宫格（2x2）布局的可视化：
-    - 每个指标一个子图
+    四宫格（2x2）可视化：
+    - 每个子图使用不同颜色
     - 显示 Mean ± 95% CI
-    - 柱子上显示 4 位小数
-    - CI 用 shaded band + annotation box
+    - 数值 4 位小数
+    - CI 阴影区按同色系显示
     """
+
     import matplotlib.pyplot as plt
     import numpy as np
+
+    # 四种颜色（每个子图使用一种）
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
 
     # 使用统一风格
     try:
@@ -292,29 +296,31 @@ def plot_results_with_ci(metrics):
         plt.rcParams['grid.alpha'] = 0.3
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    ax_goodput, ax_plr, ax_jain, ax_cov = axes.flatten()
+    axes = axes.flatten()  # flatten 成 1D list
 
-    # 四个指标
+    # 四个指标（按顺序对应颜色）
     metric_order = [
-        ('Goodput (Mbps)', ax_goodput, 'Goodput (Mbps)'),
-        ('PLR (%)', ax_plr, 'Packet Loss Rate (%)'),
-        ('Jain Index', ax_jain, "Jain's Fairness Index"),
-        ('CoV', ax_cov, 'Coefficient of Variation')
+        ('Goodput (Mbps)', "Goodput (Mbps)"),
+        ('PLR (%)', "Packet Loss Rate (%)"),
+        ('Jain Index', "Jain's Fairness Index"),
+        ('CoV', "Coefficient of Variation")
     ]
 
     runs = ['1', '2', '3', '4', '5']
     x_pos = np.arange(len(runs))
 
-    for metric_name, ax, ylabel in metric_order:
+    # ------------------- 四个子图循环 -------------------
+    for i, ((metric_name, ylabel), ax) in enumerate(zip(metric_order, axes)):
+        color = colors[i]
         values = metrics[metric_name]
 
         # 计算统计区间
         mean, lower, upper, margin = calculate_confidence_interval(values)
 
-        # 绘制柱状图
+        # 绘制柱状图（使用对应颜色）
         bars = ax.bar(
             x_pos, values,
-            color="#1f77b4",
+            color=color,
             alpha=0.85,
             edgecolor="white",
             linewidth=1.5,
@@ -328,7 +334,7 @@ def plot_results_with_ci(metrics):
         ax.set_ylabel(ylabel, fontsize=11)
         ax.set_title(ylabel, fontsize=12, fontweight="600", pad=8)
 
-        # 注：下界必须 >= 0（PLR/Goodput/CoV/Jain 均不能为负）
+        # 合理设置 y 轴范围（强制非负）
         y_min = max(0, min(values + [lower]))
         y_max = max(values + [upper])
         if y_max == y_min:
@@ -343,25 +349,25 @@ def plot_results_with_ci(metrics):
             ax.text(
                 bar.get_x() + bar.get_width() / 2.,
                 height,
-                f'{val:.4f}',   # ← 4位小数
+                f'{val:.4f}',   # ← 4 位小数
                 ha='center',
                 va='bottom',
                 fontsize=8
             )
 
-        # 绘制 mean 水平线
+        # 绘制 mean 虚线
         ax.axhline(mean, color='black', linewidth=1.4, linestyle='--')
 
-        # 绘制 95% CI 区间阴影
+        # 绘制 95% CI 区间阴影（颜色用同色系）
         ax.fill_between(
             [-0.5, len(runs) - 0.5],
             lower,
             upper,
-            color="#1f77b4",
-            alpha=0.12
+            color=color,
+            alpha=0.15
         )
 
-        # 右下角显示 CI 注释框
+        # 右下角 CI 注释框
         annotation = f"Mean={mean:.4f}\n95% CI=[{lower:.4f}, {upper:.4f}]"
         ax.text(
             0.98, 0.02, annotation,
@@ -382,6 +388,7 @@ def plot_results_with_ci(metrics):
     print("\n✓ Plot saved to: partC_reproducibility_analysis.png")
     plt.show()
     plt.close()
+
 
 
 
