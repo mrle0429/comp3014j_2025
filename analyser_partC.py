@@ -392,7 +392,7 @@ def plot_results_with_ci(metrics):
     plt.savefig("partC_reproducibility_analysis.png", dpi=300, bbox_inches="tight")
     print("\n✓ Plot saved to: partC_reproducibility_analysis.png")
     # 如果你不想在命令行弹窗看图，可以注释掉下面这行
-    #plt.show()
+    plt.show()
     plt.close()
 
 
