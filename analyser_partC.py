@@ -112,8 +112,14 @@ def calculate_jain_fairness(df1, df2):
         
         start = 2 * T / 3
         late_df = df[(df['event'] == 'r') & (df['time'] >= start)]
+        
+        if late_df.empty:
+            flow_throughputs.append(0.0)
+            continue
+        
         total_bits = late_df['size'].sum() * 8
-        late_goodput = total_bits / (T / 3) * 1e-6 if T > 0 else 0.0
+        actual_duration = late_df['time'].max() - late_df['time'].min()
+        late_goodput = total_bits / actual_duration * 1e-6 if actual_duration > 0 else 0.0
         flow_throughputs.append(late_goodput)
     
     if sum(x * x for x in flow_throughputs) > 0:
@@ -283,11 +289,11 @@ def plot_results_with_ci(metrics):
             plt.rcParams['grid.alpha'] = 0.3
     
     fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-    fig.suptitle('Reproducibility Analysis: TCP Yeah with RED Queue (n=5 runs)', 
-                 fontsize=10, y=0.98)
+    # fig.suptitle('Reproducibility Analysis: TCP Yeah with RED Queue (n=5 runs)', 
+    #              fontsize=10, y=0.98)
     
     # Color palette: professional and distinct
-    colors = ['#2E86AB', '#A23B72', '#F18F01', '#06A77D']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
     metric_configs = [
         ('Goodput (Mbps)', 'Goodput (Mbps)', colors[0], axes[0, 0]),
         ('PLR (%)', 'Packet Loss Rate (%)', colors[1], axes[0, 1]),
@@ -407,11 +413,10 @@ def main():
         print(f"  Relative uncertainty: {relative_margin:.2f}%")
     
     print("\n" + "="*80)
-    print("✓ Analysis complete! Generated files:")
+    print(" Analysis complete! Generated files:")
     print("  - partC_statistics.csv")
     print("  - partC_per_run_results.csv")
     print("  - partC_reproducibility_analysis.png")
-    print("  - partC_run_comparison.png")
     print("="*80)
 
 

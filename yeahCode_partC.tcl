@@ -131,21 +131,10 @@ $myftp1 attach-agent $source1
 set myftp2 [new Application/FTP]
 $myftp2 attach-agent $source2
 
-# Add random start-time jitter using the seeded RNG
-set rng_jitter [new RNG]
-$rng_jitter seed [expr $seed + 100]
-set rv_jitter [new RandomVariable/Uniform]
-$rv_jitter set min_ 0.0
-$rv_jitter set max_ 2.0
-$rv_jitter use-rng $rng_jitter
-
-set jitter1 [$rv_jitter value]
-set jitter2 [$rv_jitter value]
-
-puts "Start times: FTP1=$jitter1, FTP2=$jitter2"
-
-$ns at $jitter1 "$myftp1 start"
-$ns at $jitter2 "$myftp2 start"
+# Fixed start times for reproducibility testing
+# Only seed variation affects the results
+$ns at 0.0 "$myftp1 start"
+$ns at 0.0 "$myftp2 start"
 
 $ns at 100.0 "finish"
 
