@@ -9,8 +9,10 @@ def parse_trace(file_path, flow_identifier):
     Parse the trace file and extract the throughput, packet loss rate and time series data of the specified stream. 
     """
     data = []
+    # Counters for sent and received packets
     send_count = 0
     recv_count = 0
+    # Unpack the source and destination node IDs for the target flow
     flow_src, flow_dst_final = flow_identifier
     try:
         with open(file_path, 'r') as f:
@@ -18,22 +20,27 @@ def parse_trace(file_path, flow_identifier):
                 fields = line.strip().split()
                 if len(fields) < 6:
                     continue
+                # Extract key information from the trace line
                 event = fields[0]
                 src = fields[2]
                 dst = fields[3]
                 proto = fields[4]
+                # Filter for TCP packets and only 'send' or 'receive' events
                 if event not in ['+', 'r'] or proto.lower() != 'tcp':
                     continue
                 try:
                     size = int(fields[5])
                 except ValueError:
                     continue
+                # Filter out small packets
                 if size < 1000:
                     continue
+                # Extract timestamp, defaulting to 0 if invalid
                 try:
                     time = float(fields[1])
                 except ValueError:
                     time = 0.0
+                # Record send events if they match the flow's source node
                 if event == '+' and src == flow_src:
                     send_count += 1
                     data.append({
@@ -43,6 +50,7 @@ def parse_trace(file_path, flow_identifier):
                         'src': src,
                         'dst': dst
                     })
+                # Record receive events if they match the flow's destination node
                 elif event == 'r' and dst == flow_dst_final:
                     recv_count += 1
                     data.append({
@@ -54,12 +62,14 @@ def parse_trace(file_path, flow_identifier):
                     })
         df = pd.DataFrame(data) if data else pd.DataFrame(columns=['event', 'time', 'size', 'src', 'dst'])
         recv_df = df[df['event'] == 'r']
+        # Calculate goodput (Mbps) if there are receive events
         if not recv_df.empty:
             total_bits = recv_df['size'].sum() * 8
             total_time = recv_df['time'].max() - recv_df['time'].min()
             goodput = total_bits / total_time * 1e-6 if total_time > 0 else 0.0
         else:
             goodput = 0.0
+        # Calculate packet loss rate (%), avoiding division by zero
         loss_rate = ((send_count - recv_count) / send_count) * 100 if send_count > 0 else 0.0
         return goodput, loss_rate, df
     except FileNotFoundError:
@@ -83,7 +93,7 @@ def generate_table_and_plot():
         file = f'{algo}Trace.tr'
         g1, l1, _ = parse_trace(file, flow_id_1)
         g2, l2, _ = parse_trace(file, flow_id_2)
-
+        # Calculate average metrics across the two flows
         avg_g = (g1 + g2) / 2.0
         avg_l = (l1 + l2) / 2.0
         algo_list.append(algo)
@@ -102,33 +112,36 @@ def generate_table_and_plot():
         'Avg Goodput (Mbps)': avg_goodputs,
         'Avg Packet Loss Rate (%)': avg_losses,
     }
+    # Create and print the summary table
     df_table = pd.DataFrame(table_data)
     print("=== Throughput and Packet Loss Rate Table (per-flow & average) ===")
     print(df_table)
     df_table.to_csv('goodput_loss_table.csv', index=False)
+    # Create and save plots for average goodput and loss rate
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
-    ax1.bar(tcp_algos, avg_goodputs, color=['cyan', 'magenta', 'yellow', 'blue'])
+    ax1.bar(tcp_algos, avg_goodputs, color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
     ax1.set_ylabel('Avg Goodput (Mbps)')
     ax1.set_title('TCP Algorithm vs Average Goodput (2 flows)')
-    ax2.bar(tcp_algos, avg_losses, color=['cyan', 'magenta', 'yellow', 'blue'])
+    ax2.bar(tcp_algos, avg_losses, color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
     ax2.set_xlabel('TCP Algorithm')
     ax2.set_ylabel('Avg Packet Loss Rate (%)')
     ax2.set_title('TCP Algorithm vs Average Packet Loss Rate (2 flows)')
     plt.tight_layout()
     plt.savefig('goodput_loss_comparison.png')
     plt.show()
+    # Create and save plots for per-flow goodput and loss rate
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
     x = np.arange(len(tcp_algos))
     width = 0.35
-    ax1.bar(x - width/2, f1_goodputs, width, label='Flow1 (n1→n5)', color='cyan')
-    ax1.bar(x + width/2, f2_goodputs, width, label='Flow2 (n2→n6)', color='magenta')
+    ax1.bar(x - width/2, f1_goodputs, width, label='Flow1 (n1→n5)', color='#1f77b4')
+    ax1.bar(x + width/2, f2_goodputs, width, label='Flow2 (n2→n6)', color='#ff7f0e')
     ax1.set_ylabel('Goodput (Mbps)')
     ax1.set_title('TCP Algorithm vs Per-flow Goodput')
     ax1.set_xticks(x)
     ax1.set_xticklabels(tcp_algos)
     ax1.legend()
-    ax2.bar(x - width/2, f1_losses, width, label='Flow1 (n1→n5)', color='cyan')
-    ax2.bar(x + width/2, f2_losses, width, label='Flow2 (n2→n6)', color='magenta')
+    ax2.bar(x - width/2, f1_losses, width, label='Flow1 (n1→n5)', color='#1f77b4')
+    ax2.bar(x + width/2, f2_losses, width, label='Flow2 (n2→n6)', color='#ff7f0e')
     ax2.set_xlabel('TCP Algorithm')
     ax2.set_ylabel('Packet Loss Rate (%)')
     ax2.set_title('TCP Algorithm vs Per-flow Packet Loss Rate')
@@ -154,19 +167,23 @@ def calculate_jain_fairness():
         _, _, df1 = parse_trace(file, flow_id_1)
         _, _, df2 = parse_trace(file, flow_id_2)
         flow_throughputs = []
+        # Calculate throughput for each flow in the last third of the simulation
         for df in (df1, df2):
             if df.empty:
                 flow_throughputs.append(0.0)
                 continue
+            # Determine the total simulation time
             T = df['time'].max()
             if T <= 0:
                 flow_throughputs.append(0.0)
                 continue
             start = 2 * T / 3
+            # Filter events to those received in the last third
             late_df = df[(df['event'] == 'r') & (df['time'] >= start)]
             total_bits = late_df['size'].sum() * 8
             late_goodput = total_bits / (T / 3) * 1e-6 if T > 0 else 0.0
             flow_throughputs.append(late_goodput)
+        # Calculate Jain's Fairness Index
         if sum(x * x for x in flow_throughputs) > 0:
             numerator = (sum(flow_throughputs)) ** 2
             denominator = len(flow_throughputs) * sum(x**2 for x in flow_throughputs)
@@ -194,22 +211,29 @@ def calculate_throughput_cov():
         if df.empty:
             return 0.0
         df = df.copy()
+        # Group events by the second they occurred
         df['time_second'] = df['time'].astype(int)
+        # Calculate throughput (in Mbps) for each second
         recv_per_sec = df[df['event'] == 'r'].groupby('time_second')['size'].sum() * 8 / 1e6
         if recv_per_sec.empty:
             return 0.0
+        # Calculate mean and standard deviation of the per-second throughput
         mean = recv_per_sec.mean()
         std = recv_per_sec.std()
+        # CoV is std_dev / mean. Avoid division by zero.
         return std / mean if mean != 0 else 0.0
+    # Calculate CoV for each algorithm
     for algo in tcp_algos:
         file = f'{algo}Trace.tr'
         _, _, df1 = parse_trace(file, flow_id_1)
         _, _, df2 = parse_trace(file, flow_id_2)
-
+        # Calculate CoV for each flow
         cov1 = cov_from_df(df1)
         cov2 = cov_from_df(df2)
+        # Average the CoV across both flows
         cov_avg = (cov1 + cov2) / 2.0
         covs.append(cov_avg)
+    # Determine the most stable algorithm
     min_cov_idx = int(np.argmin(covs)) if covs else 0
     most_stable_algo = tcp_algos[min_cov_idx]
     print("\n=== Throughput stability (CoV, averaged over 2 flows) ===")
@@ -221,7 +245,7 @@ def get_best_algorithm(goodputs, loss_rates, jain_indices, covs):
     tcp_algos = ['cubic', 'reno', 'yeah', 'vegas']
     scores = []
     for i in range(len(tcp_algos)):
-
+        # Calculate a weighted score.
         score = (
             goodputs[i] * 0.3
             + (100 - loss_rates[i]) * 0.2
@@ -229,6 +253,7 @@ def get_best_algorithm(goodputs, loss_rates, jain_indices, covs):
             + (1 - covs[i]) * 0.2
         )
         scores.append(score)
+    # Find the algorithm with the highest score
     best_idx = int(np.argmax(scores))
     best_algo = tcp_algos[best_idx]
     best_score = scores[best_idx]
@@ -271,10 +296,10 @@ def generate_detailed_analysis(goodputs, loss_rates, jain_indices, covs, per_alg
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
     
     # Fairness graph: Jain index for each algorithm
-    ax1.bar(tcp_algos, jain_indices, color=['cyan', 'magenta', 'yellow', 'blue'])
+    ax1.bar(tcp_algos, jain_indices, color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
     ax1.set_ylabel('Jain Index')
     ax1.set_title("TCP Algorithm vs Jain's Fairness Index")
-    ax2.bar(tcp_algos, covs, color=['cyan', 'magenta', 'yellow', 'blue'])
+    ax2.bar(tcp_algos, covs, color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
     ax2.set_xlabel('TCP Algorithm')
     ax2.set_ylabel('Coefficient of Variation (CoV)')
     ax2.set_title('TCP Algorithm vs Throughput Stability (CoV)')
